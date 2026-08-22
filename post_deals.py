@@ -12,38 +12,39 @@ CITY_NAMES = {
     "PRG": "Prague 🇨🇿", "DUB": "Dublin 🇮🇪", "BER": "Berlin 🇩🇪",
     "AGP": "Malaga 🇪🇸", "ALC": "Alicante 🇪🇸", "FAO": "Faro 🇵🇹",
     "ATH": "Athens 🇬🇷", "LIS": "Lisbon 🇵🇹", "VIE": "Vienna 🇦🇹",
-    "BUD": "Budapest 🇭🇺", "KRK": "Krakow 🇵🇱", "VCE": "Venice 🇮🇹"
+    "BUD": "Budapest 🇭🇺", "KRK": "Krakow 🇵🇱", "VCE": "Venice 🇮🇹",
+    "PMI": "Mallorca 🇪🇸", "IBZ": "Ibiza 🇪🇸", "OPO": "Porto 🇵🇹"
 }
 
-def fetch_cheapest_deals(origin="LON"):
-    # show_to_affiliates=false pulls all globally cached cheap fares
+def fetch_cheapest_deals():
+    # Uses the primary Travelpayouts v3 live flight deals endpoint
     url = (
-        f"https://api.travelpayouts.com/v2/prices/latest"
-        f"?currency=gbp&origin={origin}&period_type=year&limit=30&show_to_affiliates=false&token={TRAVELPAYOUTS_TOKEN}"
+        f"https://api.travelpayouts.com/aviasales/v3/prices_for_dates"
+        f"?origin=LON&currency=gbp&unique=false&sorting=price&limit=15&token={TRAVELPAYOUTS_TOKEN}"
     )
     res = requests.get(url)
     data = res.json()
     
     if not data.get("success") or not data.get("data"):
-        print(f"API returned empty or failed: {data}")
-        return []
-    
-    # Sort from cheapest upwards
-    sorted_deals = sorted(data["data"], key=lambda x: x.get("value", 9999))
-    return sorted_deals[:3]
+        # Fallback to direct latest feed
+        fallback_url = f"https://api.travelpayouts.com/v2/prices/latest?currency=gbp&origin=LON&limit=15&show_to_affiliates=false&token={TRAVELPAYOUTS_TOKEN}"
+        f_res = requests.get(fallback_url)
+        return f_res.json().get("data", [])[:3]
+        
+    return data["data"][:3]
 
-def post_to_telegram(deal, origin="LON"):
+def post_to_telegram(deal):
     dest = deal.get("destination", "EUR")
     dest_name = CITY_NAMES.get(dest, dest)
-    price = deal.get("value", 0)
-    depart_date = deal.get("depart_date", "Upcoming")
-    return_date = deal.get("return_date", "Upcoming")
+    price = deal.get("price") or deal.get("value", 0)
+    depart_date = deal.get("departure_at", deal.get("depart_date", "Upcoming"))[:10]
+    return_date = deal.get("return_at", deal.get("return_date", "Flexible"))[:10]
     
-    booking_url = f"https://www.aviasales.com/search/{origin}0110{dest}1?marker={AFFILIATE_MARKER}"
+    booking_url = f"https://www.aviasales.com/search/LON0110{dest}1?marker={AFFILIATE_MARKER}"
     
     message = (
         f"🚨 <b>BUDGET ESCAPE FOUND</b> 🚨\n\n"
-        f"✈️ <b>Route:</b> London ({origin}) ➔ {dest_name}\n"
+        f"✈️ <b>Route:</b> London (LON) ➔ {dest_name}\n"
         f"💰 <b>Round-Trip:</b> £{price:.0f}\n"
         f"📅 <b>Depart:</b> {depart_date} | <b>Return:</b> {return_date}\n\n"
         f"🔥 <i>Fares change quickly. Tap below to check availability.</i>"
@@ -62,10 +63,9 @@ def post_to_telegram(deal, origin="LON"):
     
     send_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     res = requests.post(send_url, json=payload)
-    print(f"Posted {dest}: Response {res.status_code} - {res.text}")
+    print(f"Post result: {res.status_code} - {res.text}")
 
 if __name__ == "__main__":
-    deals = fetch_cheapest_deals("LON")
-    print(f"Fetched {len(deals)} deals.")
+    deals = fetch_cheapest_deals()
     for deal in deals:
-        post_to_telegram(deal, "LON")
+        post_to_telegram(deal)

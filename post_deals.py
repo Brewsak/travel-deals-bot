@@ -1,43 +1,57 @@
 import os
 import requests
 
-TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-TELEGRAM_CHANNEL_ID = os.environ["TELEGRAM_CHANNEL_ID"]
-TRAVELPAYOUTS_TOKEN = os.environ["TRAVELPAYOUTS_TOKEN"]
-AFFILIATE_MARKER = os.environ["AFFILIATE_MARKER"]
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID", "").strip()
+TRAVELPAYOUTS_TOKEN = os.environ.get("TRAVELPAYOUTS_TOKEN", "").strip()
+AFFILIATE_MARKER = os.environ.get("AFFILIATE_MARKER", "").strip()
 
 CITY_NAMES = {
     "BCN": "Barcelona 🇪🇸", "MAD": "Madrid 🇪🇸", "FCO": "Rome 🇮🇹",
     "MXP": "Milan 🇮🇹", "CDG": "Paris 🇫🇷", "AMS": "Amsterdam 🇳🇱",
     "PRG": "Prague 🇨🇿", "DUB": "Dublin 🇮🇪", "BER": "Berlin 🇩🇪",
-    "AGP": "Malaga 🇪🇸", "ALC": "Alicante 🇪🇸", "FAO": "Faro 🇵🇹"
+    "AGP": "Malaga 🇪🇸", "ALC": "Alicante 🇪🇸", "FAO": "Faro 🇵🇹",
+    "ATH": "Athens 🇬🇷", "LIS": "Lisbon 🇵🇹", "VIE": "Vienna 🇦🇹",
+    "BUD": "Budapest 🇭🇺", "KRK": "Krakow 🇵🇱", "VCE": "Venice 🇮🇹"
 }
 
 def fetch_cheapest_deals(origin="LON"):
-    url = f"https://api.travelpayouts.com/v2/prices/latest?currency=gbp&origin={origin}&limit=20&token={TRAVELPAYOUTS_TOKEN}"
-    response = requests.get(url).json()
+    url = (
+        f"https://api.travelpayouts.com/v2/prices/latest"
+        f"?currency=gbp&origin={origin}&period_type=year&limit=30&token={TRAVELPAYOUTS_TOKEN}"
+    )
+    res = requests.get(url)
+    print(f"API HTTP Status: {res.status_code}")
+    data = res.json()
     
-    if not response.get("success") or not response.get("data"):
+    if not data.get("success") or not data.get("data"):
+        print(f"API response notice: {data}")
         return []
     
-    deals = [d for d in response["data"] if d.get("value", 999) <= 80]
-    return sorted(deals, key=lambda x: x["value"])[:3]
+    # Sort all returned routes from cheapest to most expensive
+    raw_deals = data["data"]
+    raw_deals = sorted(raw_deals, key=lambda x: x.get("value", 9999))
+    
+    # Grab the top 3 lowest priced flights
+    top_deals = raw_deals[:3]
+    print(f"Found {len(top_deals)} deals to post.")
+    return top_deals
 
 def post_to_telegram(deal, origin="LON"):
-    dest = deal["destination"]
+    dest = deal.get("destination", "EUR")
     dest_name = CITY_NAMES.get(dest, dest)
-    price = deal["value"]
-    depart_date = deal.get("depart_date", "Flexible")
-    return_date = deal.get("return_date", "Flexible")
+    price = deal.get("value", 0)
+    depart_date = deal.get("depart_date", "Upcoming")
+    return_date = deal.get("return_date", "Upcoming")
     
     booking_url = f"https://www.aviasales.com/search/{origin}0110{dest}1?marker={AFFILIATE_MARKER}"
     
     message = (
-        f"🚨 **BUDGET ESCAPE FOUND** 🚨\n\n"
-        f"✈️ **Route:** London ({origin}) ➔ {dest_name}\n"
-        f"💰 **Round-Trip:** £{price:.0f}\n"
-        f"📅 **Depart:** {depart_date} | **Return:** {return_date}\n\n"
-        f"🔥 *Fares change quickly. Tap below to check availability.*"
+        f"🚨 *BUDGET ESCAPE FOUND* 🚨\n\n"
+        f"✈️ *Route:* London ({origin}) ➔ {dest_name}\n"
+        f"💰 *Round-Trip:* £{price:.0f}\n"
+        f"📅 *Depart:* {depart_date} | *Return:* {return_date}\n\n"
+        f"🔥 _Fares change quickly. Tap below to check availability._"
     )
     
     payload = {
@@ -53,7 +67,7 @@ def post_to_telegram(deal, origin="LON"):
     
     send_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     res = requests.post(send_url, json=payload)
-    print(f"Posted deal to {dest}: Status {res.status_code}")
+    print(f"Posted to Telegram ({dest}): Status {res.status_code} - {res.text}")
 
 if __name__ == "__main__":
     deals = fetch_cheapest_deals("LON")
